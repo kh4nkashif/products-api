@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Product Browser</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f5;
+      color: #222;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e5e5e5;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-wrap: wrap;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    header h1 { font-size: 1.2rem; font-weight: 700; white-space: nowrap; }
+
+    select, button {
+      padding: 8px 14px;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      background: #fff;
+    }
+
+    button {
+      background: #111;
+      color: #fff;
+      border-color: #111;
+      font-weight: 600;
+    }
+
+    button:disabled { opacity: 0.4; cursor: default; }
+    button.secondary { background: #fff; color: #111; border-color: #ccc; font-weight: 400; }
+
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+
+    .status { font-size: 0.85rem; color: #888; margin-bottom: 16px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .card-name { font-weight: 600; font-size: 0.95rem; line-height: 1.3; }
+    .card-cat {
+      font-size: 0.75rem;
+      background: #f0f0f0;
+      border-radius: 99px;
+      padding: 2px 10px;
+      width: fit-content;
+      color: #555;
+    }
+
+    .card-price { font-size: 1.1rem; font-weight: 700; color: #111; margin-top: auto; }
+    .card-date { font-size: 0.72rem; color: #aaa; }
+
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 32px;
+    }
+
+    .loader {
+      text-align: center;
+      padding: 48px;
+      color: #aaa;
+      font-size: 0.9rem;
+    }
+
+    .error-msg {
+      text-align: center;
+      padding: 32px;
+      color: #c00;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🛍 Product Browser</h1>
+  <select id="catFilter">
+    <option value="">All categories</option>
+  </select>
+  <select id="limitSelect">
+    <option value="20">20 / page</option>
+    <option value="50">50 / page</option>
+    <option value="100">100 / page</option>
+  </select>
+</header>
+
+<main>
+  <div class="status" id="status"></div>
+  <div class="grid" id="grid"></div>
+  <div class="loader" id="loader">Loading…</div>
+  <div class="error-msg" id="error" style="display:none"></div>
+  <div class="pagination" id="pagination" style="display:none">
+    <button class="secondary" id="prevBtn" disabled>← Prev</button>
+    <span id="pageInfo" style="font-size:0.85rem;color:#888"></span>
+    <button id="nextBtn" disabled>Next →</button>
+  </div>
+</main>
+
+<script>
+  // Change this to your deployed API URL
+  const API = (window.API_BASE || '') || 'http://localhost:3000';
+
+  let cursorStack = [];   // stack of cursors for each page visited
+  let currentCursor = null;
+  let currentCategory = '';
+  let currentLimit = 20;
+  let page = 1;
+
+  const grid = document.getElementById('grid');
+  const loader = document.getElementById('loader');
+  const errorEl = document.getElementById('error');
+  const pagination = document.getElementById('pagination');
+  const nextBtn = document.getElementById('nextBtn');
+  const prevBtn = document.getElementById('prevBtn');
+  const status = document.getElementById('status');
+  const pageInfo = document.getElementById('pageInfo');
+  const catFilter = document.getElementById('catFilter');
+  const limitSelect = document.getElementById('limitSelect');
+
+  async function fetchCategories() {
+    try {
+      const res = await fetch(`${API}/categories`);
+      const cats = await res.json();
+      cats.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        catFilter.appendChild(opt);
+      });
+    } catch {}
+  }
+
+  async function fetchProducts(cursor) {
+    loader.style.display = 'block';
+    grid.innerHTML = '';
+    errorEl.style.display = 'none';
+    pagination.style.display = 'none';
+
+    const params = new URLSearchParams({ limit: currentLimit });
+    if (cursor) params.set('cursor', cursor);
+    if (currentCategory) params.set('category', currentCategory);
+
+    try {
+      const res = await fetch(`${API}/products?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+
+      loader.style.display = 'none';
+      pagination.style.display = 'flex';
+
+      json.data.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="card-cat">${p.category}</div>
+          <div class="card-name">${p.name}</div>
+          <div class="card-price">₹${parseFloat(p.price).toLocaleString('en-IN', {minimumFractionDigits:2})}</div>
+          <div class="card-date">Added ${new Date(p.created_at).toLocaleDateString()}</div>
+        `;
+        grid.appendChild(card);
+      });
+
+      status.textContent = `Page ${page} · ${json.data.length} products${currentCategory ? ` in "${currentCategory}"` : ''}`;
+      pageInfo.textContent = `Page ${page}`;
+
+      nextBtn.disabled = !json.pagination.hasNextPage;
+      prevBtn.disabled = cursorStack.length === 0;
+
+      nextBtn.onclick = () => {
+        cursorStack.push(cursor);
+        page++;
+        fetchProducts(json.pagination.nextCursor);
+        currentCursor = json.pagination.nextCursor;
+      };
+
+      prevBtn.onclick = () => {
+        const prev = cursorStack.pop();
+        page--;
+        fetchProducts(prev || null);
+      };
+
+    } catch (err) {
+      loader.style.display = 'none';
+      errorEl.style.display = 'block';
+      errorEl.textContent = `Error: ${err.message}. Is the API running?`;
+    }
+  }
+
+  catFilter.addEventListener('change', () => {
+    currentCategory = catFilter.value;
+    cursorStack = [];
+    page = 1;
+    fetchProducts(null);
+  });
+
+  limitSelect.addEventListener('change', () => {
+    currentLimit = parseInt(limitSelect.value);
+    cursorStack = [];
+    page = 1;
+    fetchProducts(null);
+  });
+
+  fetchCategories();
+  fetchProducts(null);
+</script>
+</body>
+</html>
